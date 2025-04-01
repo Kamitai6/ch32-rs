@@ -18,13 +18,13 @@ import os.path
 import argparse
 import re
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 SVD2RUST_VERSION = "0.36.0"
 
 CRATE_VERSIONS = {
-    "ch58x": "0.3.0",
-    "ch59x": "0.1.8",
-    "ch641": "0.0.1",
+    "ch58x": "0.4.0",
+    "ch59x": "0.2.8",
+    "ch641": "0.0.2",
 }
 
 CRATE_DOC_FEATURES = {
