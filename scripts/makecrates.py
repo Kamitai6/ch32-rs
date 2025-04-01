@@ -19,7 +19,7 @@ import argparse
 import re
 
 VERSION = "0.2.0"
-SVD2RUST_VERSION = "0.31.5"
+SVD2RUST_VERSION = "0.36.0"
 
 CRATE_VERSIONS = {
     "ch58x": "0.3.0",
@@ -71,8 +71,8 @@ categories = ["embedded", "no-std", "hardware-support"]
 license = "MIT/Apache-2.0"
 
 [dependencies]
-critical-section = {{ version = "1.1", optional = true }}
-riscv = "0.10.1"
+critical-section = {{ version = "1.2", optional = true }}
+riscv = "0.12"
 vcell = "0.1"
 
 [package.metadata.docs.rs]
@@ -134,7 +134,7 @@ version = "{version}"
 features = ["{device}", "critical-section"]
 
 [dependencies.riscv]
-version = "0.10.1"
+version = "0.12"
 features = ["critical-section-single-hart"]
 ```
 
