@@ -19,7 +19,7 @@ import argparse
 import re
 
 VERSION = "0.3.0"
-SVD2RUST_VERSION = "0.36.0"
+SVD2RUST_VERSION = "0.37.1"
 
 CRATE_VERSIONS = {
     "ch58x": "0.4.0",
@@ -34,6 +34,7 @@ CRATE_DOC_FEATURES = {
     "ch32v0": ["rt", "ch32v003", "critical-section"],
     "ch32x0": ["rt", "ch32x035", "critical-section"],
     "ch32l1": ["rt", "ch32l103", "critical-section"],
+    "ch32h4": ["rt", "ch32h417", "critical-section"],
     "ch57x": ["rt", "ch57x", "critical-section"],
     "ch56x": ["rt", "ch56x", "critical-section"],
     "ch58x": ["rt", "ch58x", "critical-section"],
@@ -43,10 +44,11 @@ CRATE_DOC_FEATURES = {
 }
 
 CRATE_DOC_TARGETS = {
+    "ch32h4": "riscv32imac-unknown-none-elf",
     "ch32v3": "riscv32imac-unknown-none-elf",
     "ch32v2": "riscv32imac-unknown-none-elf",
     "ch32v1": "riscv32imac-unknown-none-elf",
-    "ch32v0": "riscv32i-unknown-none-elf", # TODO: use riscv32ec when it is supported
+    "ch32v0": "riscv32i-unknown-none-elf",
     "ch32x0": "riscv32imac-unknown-none-elf",
     "ch32l1": "riscv32imac-unknown-none-elf",
     "ch56x": "riscv32imac-unknown-none-elf",
@@ -54,7 +56,7 @@ CRATE_DOC_TARGETS = {
     "ch58x": "riscv32imac-unknown-none-elf",
     "ch59x": "riscv32imac-unknown-none-elf",
     "ch643": "riscv32imac-unknown-none-elf",
-    "ch641": "riscv32i-unknown-none-elf", # TODO: use riscv32ec when it is supported
+    "ch641": "riscv32i-unknown-none-elf",
 }
 
 CARGO_TOML_TPL = """\
@@ -72,7 +74,6 @@ license = "MIT/Apache-2.0"
 
 [dependencies]
 critical-section = {{ version = "1.2", optional = true }}
-riscv = "0.12"
 vcell = "0.1"
 
 [package.metadata.docs.rs]
@@ -134,7 +135,7 @@ version = "{version}"
 features = ["{device}", "critical-section"]
 
 [dependencies.riscv]
-version = "0.12"
+version = "0.16"
 features = ["critical-section-single-hart"]
 ```
 
