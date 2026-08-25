@@ -30,5 +30,4 @@ USBHD:
   "UEP0_DMA,UEP*_RX_DMA*,UEP*_TX_DMA*":
     _modify:
       "*":
-        bitOffset: 0
-        bitWidth: 32
+        bitRange: "[31:0]"
