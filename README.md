@@ -71,6 +71,39 @@ And, the most important, ch32-data is released under the MIT license.
 
 ## Development
 
+### For Windows
+```powershell
+py -m pip install --upgrade svdtools
+cargo install svd2rust --version 0.37.1 --locked
+
+py .\scripts\makecrates.py -y .\devices --families ch32v3
+svd patch .\devices\ch32v30x.yaml
+
+New-Item -ItemType Directory -Force .\ch32v3\src\ch32v30x
+svd2rust `
+    -m `
+    --target riscv `
+    -g `
+    --strict `
+    --ident-formats-theme legacy `
+    --max_cluster_size `
+    -o .\ch32v3\src\ch32v30x `
+    -i .\svd\fixed\ch32v30x.svd.patched
+
+Move-Item `
+    .\ch32v3\src\ch32v30x\generic.rs `
+    .\ch32v3\src\generic.rs `
+    -Force
+Remove-Item .\ch32v3\src\ch32v30x\build.rs
+rustfmt --config-path .\rustfmt.toml .\ch32v3\src\ch32v30x\mod.rs
+
+py .\scripts\fix_qingke_interrupt_vectors.py `
+    .\ch32v3\src\ch32v30x\mod.rs
+
+cd .\ch32v3
+cargo check --features "ch32v30x rt"
+```
+
 ```shell
 # Do not use rust version of svdtools
 pip install svdtools
