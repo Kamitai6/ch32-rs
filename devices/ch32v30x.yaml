@@ -26,8 +26,26 @@ USBHD:
   _modify:
     "UEP0_DMA,UEP*_RX_DMA*,UEP*_TX_DMA*":
       size: 32
+    USB_INT_FG:
+      resetValue: 0x00
 
   "UEP0_DMA,UEP*_RX_DMA*,UEP*_TX_DMA*":
     _modify:
       "*":
         bitRange: "[31:0]"
+
+  USB_INT_FG:
+    _modify:
+      "UIF_BUS_RST,UIF_TRANSFER,UIF_SUSPEND,UIF_HST_SOF,UIF_FIFO_OV":
+        modifiedWriteValues: oneToClear
+      "U_SETUP_ACT,UIF_ISO_ACT":
+        access: read-write
+        modifiedWriteValues: oneToClear
+    _delete:
+      - U_IS_NAK
+
+FLASH:
+  STATR:
+    _modify:
+      "EOP,WRPRTERR":
+        modifiedWriteValues: oneToClear
