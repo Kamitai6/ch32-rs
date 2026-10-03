@@ -23,6 +23,25 @@ _modify:
 _include:
   - ../peripherals/systick_v4.yaml
 
+# CH32V20x DMA1 has channels 1-8. Keep this V2-specific so the shared V3 DMA patch stays unchanged.
+DMA1:
+  _cluster:
+    "CHL%s":
+      description: "Channel cluster: CFGR?, CNTR?, PADDR?, and MADDR? registers"
+      "CFGR[12345678]":
+        name: CFGR
+      "CNTR[12345678]":
+        name: CNTR
+      "PADDR[12345678]":
+        name: PADDR
+      "MADDR[12345678]":
+        name: MADDR
+  _add:
+    _interrupts:
+      DMA1_Channel8:
+        description: DMA1 channel 8 global interrupt
+        value: 67
+
 # CH32V203 excluding CH32V203RB
 RCC:
   CFGR0:
@@ -76,22 +95,53 @@ RCC:
       HSE: [0b01, "HSE selected as system clock"]
       PLL: [0b10, "PLL selected as system clock"]
 
+  # Interrupt-only superset entries for CH32V20x_D8/D8W.
+  # BB/LLE occupy reserved D8 slots and are only used by D8W.
+  _add:
+    _interrupts:
+      BB:
+        description: BLE BB global interrupt (CH32V20x_D8W only)
+        value: 63
+      LLE:
+        description: BLE LLE global interrupt (CH32V20x_D8W only)
+        value: 64
+      OSC32KCal:
+        description: OSC32K calibration global interrupt
+        value: 68
+      OSCWakeUp:
+        description: OSC32K wakeup interrupt
+        value: 69
+
 #USB:
 #  _array:
 #    "EP?R": {}
 
 USB_OTG_FS:
   _delete:
-    - USBHD_UDEV_CTRL__USBHD_UHOST_CTRL
-    - UEP2_3_MOD__UH_EP_MOD
-    - UEP2_DMA__UH_RX_DMA
-    - UEP3_DMA__UH_TX_DMA
-    - UEP1_T_CTRL___USBHD_UH_SETUP
-    - UEP2_T_LEN__USBHD_UH_EP_PID
-    # FIXME: offset = 0x3a or 0x3b?
-    - UEP2_R_CTRL__USBHD_UH_RX_CTRL
-    - UEP3_T_LEN__USBHD_UH_TX_LEN
-    - UEP3_T_CTRL__USBHD_UH_TX_CTRL
+    _registers:
+      - USBHD_UDEV_CTRL__USBHD_UHOST_CTRL
+      - UEP2_3_MOD__UH_EP_MOD
+      - UEP2_DMA__UH_RX_DMA
+      - UEP3_DMA__UH_TX_DMA
+      - UEP1_T_CTRL___USBHD_UH_SETUP
+      - UEP2_T_LEN__USBHD_UH_EP_PID
+      # FIXME: offset = 0x3a or 0x3b?
+      - UEP2_R_CTRL__USBHD_UH_RX_CTRL
+      - UEP3_T_LEN__USBHD_UH_TX_LEN
+      - UEP3_T_CTRL__USBHD_UH_TX_CTRL
+    _interrupts:
+      - OTG_FS
+
+  _modify:
+    _interrupts:
+      USBHS:
+        name: USBFS
+        description: USBFS global interrupt
+        value: 59
+      USBHSWakeup:
+        name: USBFSWakeUp
+        description: USBFS wakeup interrupt
+        value: 60
 
   _add:
     # 0x50000001
@@ -206,36 +256,36 @@ USB_OTG_FS:
           bitWidth: 1
     UEP2_DMA:
       addressOffset: 0x18
-      size: 16
+      size: 32
       access: read-write
       fields:
         UEP2_DMA:
           bitOffset: 0
-          bitWidth: 16
+          bitWidth: 32
     UH_RX_DMA:
       addressOffset: 0x18
-      size: 16
+      size: 32
       access: read-write
       fields:
         UH_RX_DMA:
           bitOffset: 0
-          bitWidth: 16
+          bitWidth: 32
     UEP3_DMA:
       addressOffset: 0x1C
-      size: 16
+      size: 32
       access: read-write
       fields:
         UEP3_DMA:
           bitOffset: 0
-          bitWidth: 16
+          bitWidth: 32
     UH_TX_DMA:
       addressOffset: 0x1C
-      size: 16
+      size: 32
       access: read-write
       fields:
         UH_TX_DMA:
           bitOffset: 0
-          bitWidth: 16
+          bitWidth: 32
 
     UEP1_TX_CTRL:
       addressOffset: 0x36
@@ -278,3 +328,92 @@ USB_OTG_FS:
       addressOffset: 0x3E
       size: 8
       access: read-write
+
+# CH32V20x_D8/D8W interrupt layout used as the generated baseline.
+# fix_ch32v20x_variants.py derives the D6 interrupt enum/vector table only;
+# all peripheral/register definitions remain one CH32V20x superset.
+ETHERNET_MAC:
+  _modify:
+    _interrupts:
+      ETH:
+        value: 61
+      ETH_WKUP:
+        value: 62
+
+TIM5:
+  _modify:
+    _interrupts:
+      TIM5:
+        value: 65
+
+UART4:
+  _modify:
+    _interrupts:
+      UART4:
+        value: 66
+
+TIM8:
+  _delete:
+    _interrupts:
+      - "*"
+TIM9:
+  _delete:
+    _interrupts:
+      - "*"
+TIM10:
+  _delete:
+    _interrupts:
+      - "*"
+SPI3:
+  _delete:
+    _interrupts:
+      - "*"
+UART5:
+  _delete:
+    _interrupts:
+      - "*"
+UART6:
+  _delete:
+    _interrupts:
+      - "*"
+UART7:
+  _delete:
+    _interrupts:
+      - "*"
+UART8:
+  _delete:
+    _interrupts:
+      - "*"
+
+USBHD:
+  _modify:
+    "UEP0_DMA,UEP*_RX_DMA*,UEP*_TX_DMA*":
+      size: 32
+    USB_INT_FG:
+      resetValue: 0x00
+
+  "UEP0_DMA,UEP*_RX_DMA*,UEP*_TX_DMA*":
+    _modify:
+      "*":
+        bitRange: "[31:0]"
+
+  USB_INT_FG:
+    _modify:
+      "UIF_BUS_RST,UIF_TRANSFER,UIF_SUSPEND,UIF_HST_SOF,UIF_FIFO_OV":
+        modifiedWriteValues: oneToClear
+      "U_SETUP_ACT,UIF_ISO_ACT":
+        access: read-write
+        modifiedWriteValues: oneToClear
+    _delete:
+      - U_IS_NAK
+
+  _delete:
+    _interrupts:
+      - USBHSWakeup
+      - USBHS
+
+FLASH:
+  STATR:
+    _modify:
+      "EOP,WRPRTERR":
+        modifiedWriteValues: oneToClear

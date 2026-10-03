@@ -71,7 +71,7 @@ And, the most important, ch32-data is released under the MIT license.
 
 ## Development
 
-### For Windows
+### For Windows ch32v3
 ```powershell
 py -m pip install --upgrade svdtools
 cargo install svd2rust --version 0.37.1 --locked
@@ -102,6 +102,44 @@ py .\scripts\fix_qingke_interrupt_vectors.py `
 
 cd .\ch32v3
 cargo check --features "ch32v30x rt"
+```
+
+### For Windows ch32v2
+```powershell
+py -m pip install --upgrade svdtools
+cargo install svd2rust --version 0.37.1 --locked
+
+py .\scripts\makecrates.py -y .\devices --families ch32v2
+svd patch .\devices\ch32v20x.yaml
+
+New-Item -ItemType Directory -Force .\ch32v2\src\ch32v20x
+svd2rust `
+    -m `
+    --target riscv `
+    -g `
+    --strict `
+    --ident-formats-theme legacy `
+    --max_cluster_size `
+    -o .\ch32v2\src\ch32v20x `
+    -i .\svd\fixed\ch32v20x.svd.patched
+
+Move-Item `
+    .\ch32v2\src\ch32v20x\generic.rs `
+    .\ch32v2\src\generic.rs `
+    -Force
+Remove-Item .\ch32v2\src\ch32v20x\build.rs
+
+py .\scripts\fix_qingke_interrupt_vectors.py `
+    .\ch32v2\src\ch32v20x\mod.rs
+
+py .\scripts\fix_ch32v20x_variants.py `
+    .\ch32v2
+
+rustfmt --config-path .\rustfmt.toml .\ch32v2\src\ch32v20x\mod.rs
+
+cd .\ch32v2
+cargo check --features "ch32v20x-d6 rt"
+cargo check --features "ch32v20x-d8 rt"
 ```
 
 ```shell
