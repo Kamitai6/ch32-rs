@@ -10,19 +10,25 @@ LINK_SECTION = ".vector_table.external_interrupts"
 
 
 VECTOR_DECLARATION_PATTERN = re.compile(
-    r"pub static __EXTERNAL_INTERRUPTS: "
-    r"\[Vector; (?P<count>\d+)\] = \["
+    r"pub\s+static\s+__EXTERNAL_INTERRUPTS\s*:\s*"
+    r"\[\s*Vector\s*;\s*(?P<count>\d+)\s*\]\s*=\s*\[",
+    re.DOTALL,
 )
 RESERVED_VECTOR_PATTERN = re.compile(
-    r"\s*Vector\s*\{\s*_reserved:\s*0\s*,?\s*\},"
+    r"\s*Vector\s*\{\s*_reserved\s*:\s*0\s*,?\s*\}\s*,",
+    re.DOTALL,
 )
 VECTOR_ENTRY_PATTERN = re.compile(
     r"Vector\s*\{\s*"
-    r"(?:(?:_handler:\s*[A-Za-z_][A-Za-z0-9_]*)|"
-    r"(?:_reserved:\s*\d+))"
-    r"\s*,?\s*\},",
+    r"(?:(?:_handler\s*:\s*[A-Za-z_][A-Za-z0-9_]*)|"
+    r"(?:_reserved\s*:\s*\d+))"
+    r"\s*,?\s*\}\s*,",
     re.DOTALL,
 )
+LINK_SECTION_PATTERN = re.compile(
+    rf'#\[\s*link_section\s*=\s*"{re.escape(LINK_SECTION)}"\s*\]'
+)
+VECTOR_ARRAY_END_PATTERN = re.compile(r"\]\s*;")
 
 
 def fix_interrupt_vectors(path: Path) -> None:
@@ -55,13 +61,7 @@ def remove_qingke_core_vectors(source: str) -> tuple[str, int, int]:
 
     vector_count = int(declaration.group("count"))
     body_start = declaration.end()
-    body_end = source.find("\n];", body_start)
-
-    if body_end < 0:
-        raise RuntimeError(
-            "__EXTERNAL_INTERRUPTS closing ]; was not found"
-        )
-
+    body_end, array_end = find_vector_array_end(source, body_start)
     body = source[body_start:body_end]
     entries = list(VECTOR_ENTRY_PATTERN.finditer(body))
 
@@ -96,26 +96,44 @@ def remove_qingke_core_vectors(source: str) -> tuple[str, int, int]:
         )
 
     remaining_body = body[cursor:]
-    new_declaration = declaration.group(0).replace(
-        f"[Vector; {vector_count}]",
-        f"[Vector; {fixed_count}]",
+    new_declaration = replace_named_group(
+        declaration, "count", str(fixed_count)
     )
-    new_body = "\n" + remaining_body.lstrip("\r\n")
 
     fixed = (
         source[:declaration.start()]
         + new_declaration
-        + new_body
-        + source[body_end:]
+        + remaining_body
+        + source[body_end:array_end]
+        + source[array_end:]
     )
 
     return fixed, fixed_count, EXTERNAL_INTERRUPT_OFFSET
 
 
+def find_vector_array_end(source: str, body_start: int) -> tuple[int, int]:
+    closing = VECTOR_ARRAY_END_PATTERN.search(source, body_start)
+
+    if closing is None:
+        raise RuntimeError(
+            "__EXTERNAL_INTERRUPTS closing ]; was not found"
+        )
+
+    return closing.start(), closing.end()
+
+
+def replace_named_group(
+    match: re.Match[str], group_name: str, replacement: str
+) -> str:
+    text = match.group(0)
+    start = match.start(group_name) - match.start()
+    end = match.end(group_name) - match.start()
+    return text[:start] + replacement + text[end:]
+
+
 def has_link_section(source: str, declaration_start: int) -> bool:
-    attribute = f'#[link_section = "{LINK_SECTION}"]'
-    preceding = source[max(0, declaration_start - 512):declaration_start]
-    return attribute in preceding
+    preceding = source[max(0, declaration_start - 1024):declaration_start]
+    return LINK_SECTION_PATTERN.search(preceding) is not None
 
 
 def add_link_section(source: str) -> str:

@@ -19,6 +19,13 @@ _svd: ../svd/fixed/ch32v20x.svd
 
 _modify:
   name: CH32V20x
+  _peripherals:
+    USB:
+      # Include the 0x40006000..0x400063FF shared USBD/CAN SRAM window.
+      addressBlock:
+        offset: 0x0
+        size: 0x800
+        usage: registers
 
 _include:
   - ../peripherals/systick_v4.yaml
@@ -59,11 +66,6 @@ RCC:
       Div1: [0b00, "Not divided (when PLLCLK=48MHz)"]
       Div2: [0b01, "Divided by 2 (when PLLCLK=96MHz)"]
       Div3: [0b10, "Divided by 3 (when PLLCLK=144MHz)"]
-      Div5:
-        [
-          0b11,
-          "Divided by 5 and PLL source is HSE divided by 2 (PLLCLK=240MHz, only applied for CH32V20x_D8W/CH32F20x_D8W).",
-        ]
     PPRE2:
       Div1: [0b000, "HCLK not divided"]
       Div2: [0b100, "HCLK divided by 2"]
@@ -95,16 +97,10 @@ RCC:
       HSE: [0b01, "HSE selected as system clock"]
       PLL: [0b10, "PLL selected as system clock"]
 
-  # Interrupt-only superset entries for CH32V20x_D8/D8W.
-  # BB/LLE occupy reserved D8 slots and are only used by D8W.
+  # CH32V20x_D8-only interrupt entries missing from the vendor SVD.
+  # IRQ 63 and 64 are reserved on CH32V20x_D8.
   _add:
     _interrupts:
-      BB:
-        description: BLE BB global interrupt (CH32V20x_D8W only)
-        value: 63
-      LLE:
-        description: BLE LLE global interrupt (CH32V20x_D8W only)
-        value: 64
       OSC32KCal:
         description: OSC32K calibration global interrupt
         value: 68
@@ -112,9 +108,168 @@ RCC:
         description: OSC32K wakeup interrupt
         value: 69
 
-#USB:
-#  _array:
-#    "EP?R": {}
+  # CH32V203 has CAN1 only. CAN2 clock/reset controls are reserved for this PAC.
+  APB1PRSTR:
+    _delete:
+      - CAN2RST
+  APB1PCENR:
+    _delete:
+      - CAN2EN
+
+# CH32V203 has CAN1 only. CAN2 remapping is not exposed by the V203 PAC.
+AFIO:
+  PCFR:
+    _delete:
+      - CAN2RM
+
+# OPA3/OPA4 are not applicable to CH32V20x. Keep OPA1/OPA2 in the common V203 PAC.
+OPA:
+  CR:
+    _delete:
+      - EN3
+      - MODE3
+      - NSEL3
+      - PSEL3
+      - EN4
+      - MODE4
+      - NSEL4
+      - PSEL4
+
+# CH32V203 CAN1 corrections against Chapter 24 of the reference manual.
+# Filter-bank registers F0R1..F27R2 remain present: the manual lists all 28
+# registers in the CAN1 filter-table address range, even though CAN1 control
+# bits apply to banks 0..13 and CAN2 control bits apply to banks 14..27.
+CAN1:
+  _add:
+    TTCTLR:
+      description: CAN1 time trigger control register
+      addressOffset: 0x20
+      size: 32
+      access: read-write
+      resetValue: 0x0000FFFF
+      fields:
+        TIMCMV:
+          description: Internal counter count end value
+          bitOffset: 0
+          bitWidth: 16
+          access: read-write
+        TIMRST:
+          description: Internal counter reset control
+          bitOffset: 16
+          bitWidth: 1
+          access: write-only
+          modifiedWriteValues: oneToSet
+        MODE:
+          description: Time-triggered mode selection
+          bitOffset: 17
+          bitWidth: 1
+          access: read-write
+    TTCNT:
+      description: CAN1 time trigger count value register
+      addressOffset: 0x24
+      size: 32
+      access: read-write
+      resetValue: 0x00000000
+      fields:
+        TIMCNT:
+          description: Time-triggered count value
+          bitOffset: 0
+          bitWidth: 16
+          access: read-write
+
+  CTLR:
+    _modify:
+      RESET:
+        modifiedWriteValues: oneToSet
+  STATR:
+    _modify:
+      "SLAKI,WKUI,ERRI":
+        modifiedWriteValues: oneToClear
+  TSTATR:
+    _modify:
+      "ABRQ2,ABRQ1,ABRQ0":
+        modifiedWriteValues: oneToSet
+      "TERR2,ALST2,TXOK2,RQCP2,TERR1,ALST1,TXOK1,RQCP1,TERR0,ALST0,TXOK0,RQCP0":
+        modifiedWriteValues: oneToClear
+  RFIFO0:
+    _modify:
+      RFOM0:
+        modifiedWriteValues: oneToSet
+      "FOVR0,FULL0":
+        modifiedWriteValues: oneToClear
+  RFIFO1:
+    _modify:
+      RFOM1:
+        modifiedWriteValues: oneToSet
+      "FOVR1,FULL1":
+        modifiedWriteValues: oneToClear
+
+USB:
+  # USBD_CNTR.PDWN is status-only on CH32V20x. The register reset value already
+  # leaves this bit at 1; only the field access needs to be corrected.
+  CNTR:
+    _modify:
+      PDWN:
+        access: read-only
+
+  # USBD endpoint registers have mixed write semantics.  Keep those semantics in
+  # the SVD so svd2rust does not expose ordinary read/modify/write behavior for
+  # bits that are cleared by writing 0 or toggled by writing 1.
+  "EP0R,EP1R,EP2R,EP3R,EP4R,EP5R,EP6R,EP7R":
+    _modify:
+      CTR_TX:
+        description: Correct transfer for transmission; write 0 to clear and write 1 has no effect
+        modifiedWriteValues: zeroToClear
+      CTR_RX:
+        description: Correct transfer for reception; write 0 to clear and write 1 has no effect
+        modifiedWriteValues: zeroToClear
+      DTOG_TX:
+        description: Transmit data toggle; writing 1 toggles the bit and writing 0 has no effect
+        modifiedWriteValues: oneToToggle
+      DTOG_RX:
+        description: Receive data toggle; writing 1 toggles the bit and writing 0 has no effect
+        modifiedWriteValues: oneToToggle
+      STAT_TX:
+        description: Transmit status bits; writing 1 toggles each written bit and writing 0 has no effect
+        modifiedWriteValues: oneToToggle
+      STAT_RX:
+        description: Receive status bits; writing 1 toggles each written bit and writing 0 has no effect
+        modifiedWriteValues: oneToToggle
+      SETUP:
+        description: SETUP transaction transfer completion flag
+        access: read-only
+
+  ISTR:
+    _modify:
+      "EP_ID,DIR,CTR":
+        access: read-only
+      "ESOF,SOF,RESET,SUSP,WKUP,ERR,PMAOVR":
+        description: Interrupt flag; write 0 to clear and write 1 has no effect
+        modifiedWriteValues: zeroToClear
+
+  _modify:
+    # Reference manual defines USBD_BTABLE as R16_USBD_BTABLE.
+    BTABLE:
+      size: 16
+
+  _add:
+    # The USBD buffer descriptor table base is programmable through BTABLE, so
+    # fixed ADDRx/COUNTx register names would only be correct while BTABLE=0.
+    # Expose the complete 512-byte USBD/CAN shared SRAM as 256 raw 16-bit words.
+    # CPU-visible words are spaced by 4 bytes: 0x40006000..0x400063FC.
+    PMA_WORD%s:
+      description: USBD/CAN shared packet memory halfword
+      addressOffset: 0x400
+      size: 16
+      access: read-write
+      dim: 256
+      dimIncrement: 0x4
+      fields:
+        DATA:
+          description: USBD/CAN shared packet memory halfword data
+          bitOffset: 0
+          bitWidth: 16
+          access: read-write
 
 USB_OTG_FS:
   _delete:
@@ -125,14 +280,22 @@ USB_OTG_FS:
       - UEP3_DMA__UH_TX_DMA
       - UEP1_T_CTRL___USBHD_UH_SETUP
       - UEP2_T_LEN__USBHD_UH_EP_PID
-      # FIXME: offset = 0x3a or 0x3b?
       - UEP2_R_CTRL__USBHD_UH_RX_CTRL
       - UEP3_T_LEN__USBHD_UH_TX_LEN
       - UEP3_T_CTRL__USBHD_UH_TX_CTRL
+      # Reference manual marks USB_OTG_CR/SR as not applicable to CH32V20x.
+      - USB_OTG_CR
+      - USB_OTG_SR
     _interrupts:
       - OTG_FS
 
   _modify:
+    USBHD_BASE_CTRL:
+      resetValue: 0x06
+    USB_INT_FG:
+      resetValue: 0x20
+    "UEP0_T_LEN,UEP1_T_LEN,UEP4_T_LEN,UEP5_T_LEN,UEP6_T_LEN,UEP7_T_LEN":
+      size: 16
     _interrupts:
       USBHS:
         name: USBFS
@@ -142,6 +305,15 @@ USB_OTG_FS:
         name: USBFSWakeUp
         description: USBFS wakeup interrupt
         value: 60
+
+  USB_INT_EN:
+    _delete:
+      - USBHD_UIE_DEV_SOF
+
+  USB_INT_FG:
+    _modify:
+      "UIF_BUS_RST__UIF_DETECT,UIF_TRANSFER,UIF_SUSPEND,UIF_HST_SOF,UIF_FIFO_OV":
+        modifiedWriteValues: oneToClear
 
   _add:
     # 0x50000001
@@ -262,6 +434,7 @@ USB_OTG_FS:
         UEP2_DMA:
           bitOffset: 0
           bitWidth: 32
+    # Keep 32-bit access here: WCH's CH32V20x USBFS host struct uses uint32_t for HOST_RX_DMA/HOST_TX_DMA.
     UH_RX_DMA:
       addressOffset: 0x18
       size: 32
@@ -293,7 +466,7 @@ USB_OTG_FS:
       access: read-write
     UEP2_T_LEN:
       addressOffset: 0x38
-      size: 8
+      size: 16
       access: read-write
     UEP2_RX_CTRL:
       addressOffset: 0x3B
@@ -301,7 +474,7 @@ USB_OTG_FS:
       access: read-write
     UEP3_T_LEN:
       addressOffset: 0x3C
-      size: 8
+      size: 16
       access: read-write
     UEP3_TX_CTRL:
       addressOffset: 0x3E
@@ -310,35 +483,605 @@ USB_OTG_FS:
 
     UH_SETUP:
       addressOffset: 0x36
-      size: 8
+      size: 16
       access: read-write
     UH_EP_PID:
       addressOffset: 0x38
       size: 8
       access: read-write
     UH_RX_CTRL:
-      addressOffset: 0x3A
+      addressOffset: 0x3B
       size: 8
       access: read-write
     UH_TX_LEN:
       addressOffset: 0x3C
-      size: 8
+      size: 16
       access: read-write
     UH_TX_CTRL:
       addressOffset: 0x3E
       size: 8
       access: read-write
 
-# CH32V20x_D8/D8W interrupt layout used as the generated baseline.
+# CH32V20x_D8 interrupt layout used as the generated baseline.
 # fix_ch32v20x_variants.py derives the D6 interrupt enum/vector table only;
 # all peripheral/register definitions remain one CH32V20x superset.
 ETHERNET_MAC:
+  # Chapter 27.2 10BASE-T Ethernet controller used by CH32F208/CH32V203/CH32V208.
+  # The vendor SVD contains the Chapter 27.1 STM32-like MAC register layout for
+  # CH32F207/CH32V307/CH32V317 instead, so replace the MAC register block here.
+  _delete:
+    _registers:
+      - MACCR
+      - MACFFR
+      - MACHTHR
+      - MACHTLR
+      - MACMIIAR
+      - MACMIIDR
+      - MACFCR
+      - MACVLANTR
+      - MACRWUFFR
+      - MACPMTCSR
+      - MACSR
+      - MACIMR
+      - MACA0HR
+      - MACA0LR
+      - MACA1HR
+      - MACA1LR
+      - MACA2HR
+      - MACA2LR
+      - MACA3HR
+      - MACA3LR
+
   _modify:
+    description: 10M Ethernet controller
     _interrupts:
       ETH:
         value: 61
       ETH_WKUP:
         value: 62
+
+  _add:
+    EIE:
+      description: Ethernet interrupt enable register
+      addressOffset: 0x03
+      size: 8
+      access: read-write
+      resetValue: 0x00
+      fields:
+        INTIE:
+          description: Ethernet global interrupt enable
+          bitOffset: 7
+          bitWidth: 1
+        RXIE:
+          description: Receive completed interrupt enable
+          bitOffset: 6
+          bitWidth: 1
+        LINKIE:
+          description: Link change interrupt enable
+          bitOffset: 4
+          bitWidth: 1
+        TXIE:
+          description: Transmit completed interrupt enable
+          bitOffset: 3
+          bitWidth: 1
+        R_EN50:
+          description: Built-in 50-ohm impedance matching resistor enable
+          bitOffset: 2
+          bitWidth: 1
+        TXERIE:
+          description: Transmit error interrupt enable
+          bitOffset: 1
+          bitWidth: 1
+        RXERIE:
+          description: Receive error interrupt enable
+          bitOffset: 0
+          bitWidth: 1
+
+    EIR:
+      description: Ethernet interrupt flag register
+      addressOffset: 0x04
+      size: 8
+      access: read-write
+      resetValue: 0x00
+      fields:
+        RXIF:
+          description: Receive completed flag; write 1 to clear
+          bitOffset: 6
+          bitWidth: 1
+          modifiedWriteValues: oneToClear
+        LINKIF:
+          description: Link change flag; write 1 to clear
+          bitOffset: 4
+          bitWidth: 1
+          modifiedWriteValues: oneToClear
+        TXIF:
+          description: Transmit completed flag; write 1 to clear
+          bitOffset: 3
+          bitWidth: 1
+          modifiedWriteValues: oneToClear
+        TXERIF:
+          description: Transmit error flag; write 1 to clear
+          bitOffset: 1
+          bitWidth: 1
+          modifiedWriteValues: oneToClear
+        RXERIF:
+          description: Receive error flag; write 1 to clear
+          bitOffset: 0
+          bitWidth: 1
+          modifiedWriteValues: oneToClear
+
+    ESTAT:
+      description: Ethernet status register
+      addressOffset: 0x05
+      size: 8
+      access: read-write
+      resetValue: 0x00
+      fields:
+        INT:
+          description: Ethernet interrupt status; write 1 to clear
+          bitOffset: 7
+          bitWidth: 1
+          modifiedWriteValues: oneToClear
+        BUFER:
+          description: Buffer error status; write 1 to clear
+          bitOffset: 6
+          bitWidth: 1
+          modifiedWriteValues: oneToClear
+        RXCRCER:
+          description: Receive CRC error status
+          bitOffset: 5
+          bitWidth: 1
+          access: read-only
+        RXNIBBLE:
+          description: Receive nibble error status
+          bitOffset: 4
+          bitWidth: 1
+          access: read-only
+        RXMORE:
+          description: Received packet exceeded configured maximum length
+          bitOffset: 3
+          bitWidth: 1
+          access: read-only
+        RXBUSY:
+          description: Receive in progress
+          bitOffset: 2
+          bitWidth: 1
+          access: read-only
+        TXABRT:
+          description: Transmission interrupted by MCU
+          bitOffset: 1
+          bitWidth: 1
+          access: read-only
+
+    ECON2:
+      description: PHY analog parameter setting register
+      addressOffset: 0x06
+      size: 8
+      access: read-write
+      resetValue: 0x0A
+      fields:
+        RX_MUST:
+          description: PHY receive analog tuning field; preserve the documented required value
+          bitOffset: 1
+          bitWidth: 3
+        TX:
+          description: Transmitter energy-saving driver control
+          bitOffset: 0
+          bitWidth: 1
+
+    ECON1:
+      description: Ethernet receive/transmit control register
+      addressOffset: 0x07
+      size: 8
+      access: read-write
+      resetValue: 0x00
+      fields:
+        TXRST:
+          description: Transmit module reset
+          bitOffset: 7
+          bitWidth: 1
+        RXRST:
+          description: Receive module reset
+          bitOffset: 6
+          bitWidth: 1
+        TXRTS:
+          description: Start transmission; hardware clears after completion
+          bitOffset: 3
+          bitWidth: 1
+        RXEN:
+          description: Receive enable
+          bitOffset: 2
+          bitWidth: 1
+
+    # The reference manual marks ETH_TX/ETXST/ETXLN reset values as unknown.
+    # The source SVD has a device-wide resetValue=0, so the generated zero
+    # Resettable impls are removed by fix_ch32v20x_variants.py.
+    ETH_TX:
+      description: Transmit DMA control register alias
+      addressOffset: 0x08
+      size: 32
+      access: read-write
+      fields:
+        ETXST:
+          description: Transmit DMA buffer start address
+          bitOffset: 0
+          bitWidth: 16
+        ETXLN:
+          description: Transmission length
+          bitOffset: 16
+          bitWidth: 16
+
+    ETXST:
+      description: Transmit DMA buffer start address register
+      addressOffset: 0x08
+      size: 16
+      access: read-write
+      fields:
+        ETXST:
+          description: Transmit DMA buffer start address; address must be 4-byte aligned
+          bitOffset: 0
+          bitWidth: 16
+
+    ETXLN:
+      description: Ethernet transmission length register
+      addressOffset: 0x0A
+      size: 16
+      access: read-write
+      fields:
+        ETXLN:
+          description: Transmission length
+          bitOffset: 0
+          bitWidth: 16
+
+    ETH_RX:
+      description: Receive DMA control register alias
+      addressOffset: 0x0C
+      size: 32
+      access: read-write
+      resetValue: 0x00000000
+      fields:
+        ERXST:
+          description: Receive DMA buffer start address
+          bitOffset: 0
+          bitWidth: 16
+        ERXLN:
+          description: Reception length
+          bitOffset: 16
+          bitWidth: 16
+          access: read-only
+
+    ERXST:
+      description: Receive DMA buffer start address register
+      addressOffset: 0x0C
+      size: 16
+      access: read-write
+      resetValue: 0x0000
+      fields:
+        ERXST:
+          description: Receive DMA buffer start address; address must be 4-byte aligned
+          bitOffset: 0
+          bitWidth: 16
+
+    ERXLN:
+      description: Ethernet reception length register
+      addressOffset: 0x0E
+      size: 16
+      access: read-only
+      resetValue: 0x0000
+      fields:
+        ERXLN:
+          description: Reception length
+          bitOffset: 0
+          bitWidth: 16
+
+    HTL:
+      description: Ethernet hash table low register
+      addressOffset: 0x10
+      size: 32
+      access: read-write
+      resetValue: 0x484EA033
+      fields:
+        EHT0:
+          description: Hash table byte 0
+          bitOffset: 0
+          bitWidth: 8
+        EHT1:
+          description: Hash table byte 1
+          bitOffset: 8
+          bitWidth: 8
+        EHT2:
+          description: Hash table byte 2
+          bitOffset: 16
+          bitWidth: 8
+        EHT3:
+          description: Hash table byte 3
+          bitOffset: 24
+          bitWidth: 8
+
+    HTH:
+      description: Ethernet hash table high register
+      addressOffset: 0x14
+      size: 32
+      access: read-write
+      resetValue: 0x5000EF97
+      fields:
+        EHT4:
+          description: Hash table byte 4
+          bitOffset: 0
+          bitWidth: 8
+        EHT5:
+          description: Hash table byte 5
+          bitOffset: 8
+          bitWidth: 8
+        EHT6:
+          description: Hash table byte 6
+          bitOffset: 16
+          bitWidth: 8
+        EHT7:
+          description: Hash table byte 7
+          bitOffset: 24
+          bitWidth: 8
+
+    ETH_MACON:
+      description: MAC control register alias
+      addressOffset: 0x18
+      size: 32
+      access: read-write
+      resetValue: 0x10000000
+      fields:
+        ERXFCON:
+          description: Receive packet filter control byte
+          bitOffset: 0
+          bitWidth: 8
+        MACON1:
+          description: MAC layer flow control byte
+          bitOffset: 8
+          bitWidth: 8
+        MACON2:
+          description: MAC layer packet control byte
+          bitOffset: 16
+          bitWidth: 8
+        MABBIPG:
+          description: Minimum packet interval byte
+          bitOffset: 24
+          bitWidth: 8
+
+    ERXFCON:
+      description: Ethernet receive packet filter control register
+      addressOffset: 0x18
+      size: 8
+      access: read-write
+      resetValue: 0x00
+      fields:
+        UCEN:
+          description: Unicast match filter enable
+          bitOffset: 7
+          bitWidth: 1
+        CRCEN:
+          description: Receive packets with CRC errors
+          bitOffset: 5
+          bitWidth: 1
+        EN:
+          description: Receive filtering enable
+          bitOffset: 4
+          bitWidth: 1
+        MPEN:
+          description: Magic packet filter enable
+          bitOffset: 3
+          bitWidth: 1
+        HTEN:
+          description: Hash table match filter enable
+          bitOffset: 2
+          bitWidth: 1
+        MCEN:
+          description: Multicast receive enable
+          bitOffset: 1
+          bitWidth: 1
+        BCEN:
+          description: Broadcast receive enable
+          bitOffset: 0
+          bitWidth: 1
+
+    MACON1:
+      description: Ethernet MAC layer flow control register
+      addressOffset: 0x19
+      size: 8
+      access: read-write
+      resetValue: 0x00
+      fields:
+        FCEN:
+          description: Pause frame mode
+          bitOffset: 4
+          bitWidth: 2
+        TXPAUS:
+          description: Transmit pause frame enable
+          bitOffset: 3
+          bitWidth: 1
+        RXPAUS:
+          description: Receive pause frame enable
+          bitOffset: 2
+          bitWidth: 1
+        PASSALL:
+          description: Pass unfiltered control frames to buffer
+          bitOffset: 1
+          bitWidth: 1
+        MARXEN:
+          description: MAC layer receive enable
+          bitOffset: 0
+          bitWidth: 1
+
+    MACON2:
+      description: Ethernet MAC layer packet control register
+      addressOffset: 0x1A
+      size: 8
+      access: read-write
+      resetValue: 0x00
+      fields:
+        PADCFG:
+          description: Short packet padding configuration
+          bitOffset: 5
+          bitWidth: 3
+        TXCRCEN:
+          description: Transmit CRC append enable
+          bitOffset: 4
+          bitWidth: 1
+        PHDREN:
+          description: Exclude special four bytes from CRC
+          bitOffset: 3
+          bitWidth: 1
+        HFRMEN:
+          description: Jumbo frame receive enable
+          bitOffset: 2
+          bitWidth: 1
+        FULDPX:
+          description: Full-duplex mode enable
+          bitOffset: 0
+          bitWidth: 1
+
+    MABBIPG:
+      description: Ethernet minimum packet interval register
+      addressOffset: 0x1B
+      size: 8
+      access: read-write
+      resetValue: 0x10
+      fields:
+        MABBIPG:
+          description: Minimum number of packet interval bytes
+          bitOffset: 0
+          bitWidth: 7
+
+    # ETH_TIM/EPAUS reset values are also documented as unknown.
+    ETH_TIM:
+      description: Flow control timing register alias
+      addressOffset: 0x1C
+      size: 32
+      access: read-write
+      fields:
+        EPAUS:
+          description: Flow control pause frame time
+          bitOffset: 0
+          bitWidth: 16
+        MAMXFL:
+          description: Maximum receive packet length
+          bitOffset: 16
+          bitWidth: 16
+
+    EPAUS:
+      description: Ethernet flow control pause frame time register
+      addressOffset: 0x1C
+      size: 16
+      access: read-write
+      fields:
+        EPAUS:
+          description: Flow control pause frame time
+          bitOffset: 0
+          bitWidth: 16
+
+    MAMXFL:
+      description: Ethernet maximum receive packet length register
+      addressOffset: 0x1E
+      size: 16
+      access: read-write
+      resetValue: 0x0000
+      fields:
+        MAMXFL:
+          description: Maximum receive packet length
+          bitOffset: 0
+          bitWidth: 16
+
+    MIRD:
+      description: Ethernet MII read register
+      addressOffset: 0x20
+      size: 16
+      access: read-write
+      resetValue: 0x1100
+      fields:
+        MIRD:
+          description: MII read data
+          bitOffset: 0
+          bitWidth: 16
+
+    ETH_MIWR:
+      description: MII access register alias
+      addressOffset: 0x24
+      size: 32
+      access: read-write
+      resetValue: 0x00000000
+      fields:
+        MIREGADR:
+          description: PHY register address control byte
+          bitOffset: 0
+          bitWidth: 8
+        MISTAT:
+          description: MII status byte
+          bitOffset: 8
+          bitWidth: 8
+          access: read-only
+        MIWR:
+          description: MII write data
+          bitOffset: 16
+          bitWidth: 16
+          access: write-only
+
+    MIREGADR:
+      description: Ethernet MII address register
+      addressOffset: 0x24
+      size: 8
+      access: read-write
+      resetValue: 0x00
+      fields:
+        MIRDL:
+          description: PHY register address
+          bitOffset: 0
+          bitWidth: 5
+
+    MISTAT:
+      description: Ethernet MII status register
+      addressOffset: 0x25
+      size: 8
+      access: read-only
+      resetValue: 0x00
+      fields:
+        MII_STA:
+          description: MII register operation status
+          bitOffset: 0
+          bitWidth: 1
+
+    MIWR:
+      description: Ethernet MII write register
+      addressOffset: 0x26
+      size: 16
+      access: write-only
+      resetValue: 0x0000
+      fields:
+        MIWR:
+          description: MII write data
+          bitOffset: 0
+          bitWidth: 16
+
+    # The hardware MAC address reset contents are device-specific/unknown,
+    # therefore Resettable must not synthesize zero for MAADRL/MAADRH.
+    MAADRL:
+      description: Ethernet MAC address low register
+      addressOffset: 0x28
+      size: 32
+      access: read-write
+      fields:
+        MAADRL:
+          description: MAC address bytes 1 to 4
+          bitOffset: 0
+          bitWidth: 32
+
+    MAADRH:
+      description: Ethernet MAC address high register
+      addressOffset: 0x2C
+      size: 16
+      access: read-write
+      fields:
+        MAADRH:
+          description: MAC address bytes 5 to 6
+          bitOffset: 0
+          bitWidth: 16
 
 TIM5:
   _modify:
@@ -386,7 +1129,28 @@ UART8:
       - "*"
 
 USBHD:
+  # Chapter 22 USBHS/USBHD register model.  Keep this block as part of the
+  # CH32V20x superset even when a particular CH32V203 package does not expose
+  # the host/device pins.  D8W-only functionality is intentionally not added.
+  _delete:
+    _registers:
+      # The vendor SVD merged device registers with host aliases.  Split those
+      # aliases so each mode gets the width/fields documented by chapter 22.
+      - UEP2_RX_DMA__UH_RX_DMA
+      - UEP3_TX_DMA__UH_TX_DMA
+      - UEP12_TX_DMA____UH_SPLIT_DATA
+      - UEP2_MAX_LEN__UH_RX_MAX_LEN
+      - UEP2_T_LEN__UH_EP_PID
+      - UEP2_R_CTRL__UH_RX_CTRL
+      - UEP3_T_LEN___UH_TX_LEN_H
+      - UEP3_T_CTRL___UH_TX_CTRL
+    _interrupts:
+      # CH32V20x D6/D8 do not have separate USBHS interrupt-vector entries.
+      - USBHSWakeup
+      - USBHS
+
   _modify:
+    # Device endpoint DMA registers are 32-bit addresses in chapter 22.
     "UEP0_DMA,UEP*_RX_DMA*,UEP*_TX_DMA*":
       size: 32
     USB_INT_FG:
@@ -397,20 +1161,303 @@ USBHD:
       "*":
         bitRange: "[31:0]"
 
+  USB_DEV_AD:
+    _delete:
+      # Bit 7 is reserved in chapter 22.
+      - UDA_GP_BIT
+
+  USB_USB_SUSPEND:
+    _modify:
+      # USB_WAKEUP_ST and USB_LINESTATE are hardware status fields.
+      USB_WAKEUP:
+        access: read-only
+      USB_LINESTATE:
+        access: read-only
+
   USB_INT_FG:
     _modify:
       "UIF_BUS_RST,UIF_TRANSFER,UIF_SUSPEND,UIF_HST_SOF,UIF_FIFO_OV":
         modifiedWriteValues: oneToClear
+      # The table labels these status bits RO, but their descriptions explicitly
+      # require software write-1-to-clear.  Expose that clearing operation.
       "U_SETUP_ACT,UIF_ISO_ACT":
         access: read-write
         modifiedWriteValues: oneToClear
     _delete:
+      # Bit 7 is reserved in R8_USB_INT_FG; NAK state is reported by USB_INT_ST.
       - U_IS_NAK
 
-  _delete:
-    _interrupts:
-      - USBHSWakeup
-      - USBHS
+  UEP0_T_CTRL:
+    _delete:
+      # Endpoint 0 does not support automatic transmit-toggle control.
+      - bUEP_T_TOG_AUTO
+
+  UEP0_R_CTRL:
+    _delete:
+      # Endpoint 0 does not support automatic receive-toggle control.
+      - bUEP_R_TOG_AUTO
+
+  _add:
+    # --- Device-mode registers that were incorrectly merged with host aliases ---
+    UEP2_RX_DMA:
+      description: Endpoint 2 receive buffer start address
+      addressOffset: 0x24
+      size: 32
+      access: read-write
+      fields:
+        UEP2_RX_DMA:
+          description: Endpoint 2 receive buffer start address
+          bitOffset: 0
+          bitWidth: 32
+
+    UEP3_TX_DMA:
+      description: Endpoint 3 transmit buffer start address
+      addressOffset: 0x64
+      size: 32
+      access: read-write
+      fields:
+        UEP3_TX_DMA:
+          description: Endpoint 3 transmit buffer start address
+          bitOffset: 0
+          bitWidth: 32
+
+    UEP12_TX_DMA:
+      description: Endpoint 12 transmit buffer start address
+      addressOffset: 0x88
+      size: 32
+      access: read-write
+      fields:
+        UEP12_TX_DMA:
+          description: Endpoint 12 transmit buffer start address
+          bitOffset: 0
+          bitWidth: 32
+
+    UEP2_MAX_LEN:
+      description: Endpoint 2 maximum receive packet length
+      addressOffset: 0xA0
+      size: 16
+      access: read-write
+      fields:
+        UEP2_MAX_LEN:
+          description: Endpoint 2 maximum receive packet length
+          bitOffset: 0
+          bitWidth: 11
+
+    UEP2_T_LEN:
+      description: Endpoint 2 transmit length
+      addressOffset: 0xE0
+      size: 16
+      access: read-write
+      fields:
+        UEP2_T_LEN:
+          description: Endpoint 2 transmit byte count
+          bitOffset: 0
+          bitWidth: 11
+
+    UEP2_R_CTRL:
+      description: Endpoint 2 receive control register
+      addressOffset: 0xE3
+      size: 8
+      access: read-write
+      fields:
+        MASK_UEP_R_RES:
+          description: Endpoint 2 OUT response control
+          bitOffset: 0
+          bitWidth: 2
+        MASK_UEP_R_TOG:
+          description: Endpoint 2 expected receive data toggle
+          bitOffset: 3
+          bitWidth: 2
+        bUEP_R_TOG_AUTO:
+          description: Endpoint 2 automatic receive-toggle status/control as documented by the device register
+          bitOffset: 5
+          bitWidth: 1
+          access: read-only
+
+    UEP3_T_LEN:
+      description: Endpoint 3 transmit length
+      addressOffset: 0xE4
+      size: 16
+      access: read-write
+      fields:
+        UEP3_T_LEN:
+          description: Endpoint 3 transmit byte count
+          bitOffset: 0
+          bitWidth: 11
+
+    UEP3_T_CTRL:
+      description: Endpoint 3 transmit control register
+      addressOffset: 0xE6
+      size: 8
+      access: read-write
+      fields:
+        MASK_UEP_T_RES:
+          description: Endpoint 3 IN response control
+          bitOffset: 0
+          bitWidth: 2
+        MASK_UEP_T_TOG:
+          description: Endpoint 3 transmit data toggle
+          bitOffset: 3
+          bitWidth: 2
+        bUEP_T_TOG_AUTO:
+          description: Endpoint 3 automatic transmit-toggle enable
+          bitOffset: 5
+          bitWidth: 1
+
+    # --- Host-mode aliases from table 22-3 ---
+    UH_CONFIG:
+      description: USB host endpoint configuration register
+      addressOffset: 0x10
+      size: 32
+      access: read-write
+      fields:
+        UH_EP_TX_EN:
+          description: Host transmit endpoint enable control
+          bitOffset: 3
+          bitWidth: 1
+        UH_EP_RX_EN:
+          description: Host receive endpoint enable control
+          bitOffset: 18
+          bitWidth: 1
+
+    UH_EP_TYPE:
+      description: USB host endpoint type register
+      addressOffset: 0x14
+      size: 32
+      access: read-write
+      fields:
+        UH_EP_TX_TYPE:
+          description: Host transmit endpoint synchronous-transfer type
+          bitOffset: 3
+          bitWidth: 1
+        UH_EP_RX_TYPE:
+          description: Host receive endpoint synchronous-transfer type
+          bitOffset: 18
+          bitWidth: 1
+
+    UH_RX_DMA:
+      description: USB host receive buffer start address
+      addressOffset: 0x24
+      size: 32
+      access: read-write
+      fields:
+        UH_RX_DMA:
+          description: Host receive buffer address, low 17 address bits implemented
+          bitOffset: 0
+          bitWidth: 17
+
+    UH_TX_DMA:
+      description: USB host transmit buffer start address
+      addressOffset: 0x64
+      size: 32
+      access: read-write
+      fields:
+        UH_TX_DMA:
+          description: Host transmit buffer address, low 17 address bits implemented
+          bitOffset: 0
+          bitWidth: 17
+
+    UH_RX_MAX_LEN:
+      description: USB host receive maximum packet length
+      addressOffset: 0xA0
+      size: 16
+      access: read-write
+      fields:
+        UH_RX_MAX_LEN:
+          description: Host receive maximum packet length
+          bitOffset: 0
+          bitWidth: 11
+
+    UH_EP_PID:
+      description: USB host token and endpoint setup register
+      addressOffset: 0xE0
+      size: 8
+      access: read-write
+      fields:
+        MASK_UH_ENDP:
+          description: Target endpoint number
+          bitOffset: 0
+          bitWidth: 4
+        MASK_UH_TOKEN:
+          description: Token PID for the current host transaction
+          bitOffset: 4
+          bitWidth: 4
+
+    UH_RX_CTRL:
+      description: USB host receive endpoint control register
+      addressOffset: 0xE3
+      size: 8
+      access: read-write
+      fields:
+        MASK_UH_R_RES:
+          description: Host receive response control
+          bitOffset: 0
+          bitWidth: 2
+        UH_R_RES_NO:
+          description: Disable acknowledgement for applicable synchronous transfers
+          bitOffset: 2
+          bitWidth: 1
+        MASK_UH_R_TOG:
+          description: Expected receive data toggle
+          bitOffset: 3
+          bitWidth: 2
+        UH_R_AUTO_TOG:
+          description: Automatic receive-toggle enable
+          bitOffset: 5
+          bitWidth: 1
+        UH_R_DATA_NO:
+          description: Do not expect a data packet
+          bitOffset: 6
+          bitWidth: 1
+
+    UH_TX_LEN:
+      description: USB host transmit length register
+      addressOffset: 0xE4
+      size: 16
+      access: read-write
+      fields:
+        UH_TX_LEN:
+          description: Host transmit byte count
+          bitOffset: 0
+          bitWidth: 11
+
+    UH_TX_CTRL:
+      description: USB host transmit endpoint control register
+      addressOffset: 0xE6
+      size: 8
+      access: read-write
+      fields:
+        MASK_UH_T_RES:
+          description: Host transmit response control
+          bitOffset: 0
+          bitWidth: 2
+        UH_T_RES_NO:
+          description: Disable acknowledgement for applicable synchronous transfers
+          bitOffset: 2
+          bitWidth: 1
+        MASK_UH_T_TOG:
+          description: Transmit data toggle
+          bitOffset: 3
+          bitWidth: 2
+        UH_T_AUTO_TOG:
+          description: Automatic transmit-toggle enable
+          bitOffset: 5
+          bitWidth: 1
+        UH_T_DATA_NO:
+          description: Do not transmit a data packet
+          bitOffset: 6
+          bitWidth: 1
+
+    UH_SPLIT_DATA:
+      description: USB host SPLIT packet data register
+      addressOffset: 0xE8
+      size: 16
+      access: read-write
+      fields:
+        UH_SPLIT_DATA:
+          description: Low 12 bits of the SPLIT packet payload
+          bitOffset: 0
+          bitWidth: 12
 
 FLASH:
   STATR:
